@@ -4,6 +4,12 @@ Chrome extension that finds a readable article on the page, injects a compact au
 
 HearHear is part of the Agent ² / A2gent workspace. It does not talk to remote agents by itself: it sends article text to the Brute server you configure (default `http://localhost:5445`).
 
+
+
+
+https://github.com/user-attachments/assets/f5a12ad4-9380-436f-8abe-87c5c35d10e1
+
+
 ## Install
 
 Requirements: Node.js 22+, Chrome 116+ (current Chrome recommended), and a running Brute server with `GET /speech/models` and `POST /speech/completion`.
