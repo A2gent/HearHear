@@ -20,3 +20,7 @@
 - Browser HTML fixtures containing Cyrillic must declare UTF-8. Otherwise Chromium decodes them as Windows-1252 and payload/highlight assertions test mojibake instead of Russian text.
 - Do not spread article-sized arrays into `push`: extraction runs before the 60,000-character check, and oversized pages can exceed the engine argument limit. Copy source-map entries with loops instead.
 - Insert new top-level tests only after verifying surrounding braces; a nested `node:test` plus an active UI interval can hide the syntax mistake as a timeout.
+- Media element events (`pause`, `play`) are queued tasks: a command reply built from `status()` right after `audio.pause()` still reports `playing`. Set the phase synchronously in the command handler and prefer explicit `play`/`pause` actions over `toggle`, so a stale UI phase cannot invert the user's intent.
+- `audio.pause()` while `play()` is still pending rejects it with `AbortError`. Do not label that as an autoplay block; only non-Abort rejections deserve the "press play again" hint.
+- Headless Chromium can hold a WAV at `readyState=1` for seconds, so `currentTime` may stay at 0 right after `play()`; wait on state polling rather than asserting immediate progress.
+- Any UI `busy` flag guarding requests needs a timeout: a lost extension reply (service worker restart) otherwise disables controls forever.

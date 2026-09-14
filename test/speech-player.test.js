@@ -67,16 +67,16 @@ test('loading -> playing -> pause/resume -> seek/end and cached replay', async (
   assert.equal(player.status(1).phase, 'loading');
   await pending;
   assert.equal(player.status(1).phase, 'playing');
-  await player.command(1, 'toggle');
+  await player.command(1, 'pause');
   assert.equal(player.status(1).phase, 'paused');
-  await player.command(1, 'toggle');
+  await player.command(1, 'play');
   await player.command(1, 'seek', 35);
   assert.equal(audio.currentTime, 35);
   await player.command(2, 'seek', 50);
   assert.equal(audio.currentTime, 35);
   audio.dispatchEvent(new Event('ended'));
   assert.equal(player.status(1).phase, 'ended');
-  await player.command(1, 'toggle');
+  await player.command(1, 'play');
   assert.equal(audio.currentTime, 0);
   assert.equal(calls, 1);
   player.stop(1);
@@ -160,9 +160,9 @@ test('autoplay block delays prefetch and pausing never queues the rest of the ar
   await player.start(1, {text:'First. Second. Third.'});
   assert.deepEqual(calls, ['First.']);
   audio.play = FakeAudio.prototype.play;
-  await player.command(1, 'toggle'); await tick();
+  await player.command(1, 'play'); await tick();
   assert.deepEqual(calls, ['First.', 'Second.']);
-  await player.command(1, 'toggle'); await tick();
+  await player.command(1, 'pause'); await tick();
   assert.equal(player.status(1).phase, 'paused');
   assert.equal(calls.length, 2);
   player.stop(1);
@@ -175,7 +175,7 @@ test('multi-chunk replay restarts the article and releases completed audio cache
   assert.equal(player.cache.size, 1);
   audio.dispatchEvent(new Event('ended'));
   assert.equal(player.status(1).phase, 'ended');
-  await player.command(1, 'toggle'); await tick();
+  await player.command(1, 'play'); await tick();
   assert.equal(player.status(1).chunkIndex, 0);
   assert.deepEqual(calls, ['First.', 'Second.', 'First.', 'Second.']);
   player.stop(1);
@@ -196,5 +196,43 @@ test('replacement cancels speculative audio without corrupting the new owner', a
   assert.equal(player.status(1).phase, 'idle');
   assert.equal(player.status(2).phase, 'playing');
   assert.equal(player.status(2).chunkCount, 1);
+  player.stop(2);
+});
+
+test('pause reports the new phase before the pause event and a pause-interrupted play is not a policy error', async () => {
+  const {player, audio} = setup(async () => new Blob(['audio']));
+  // Real media elements dispatch the pause event asynchronously after pause().
+  audio.pause = function() { this.paused = true; setTimeout(() => this.dispatchEvent(new Event('pause')), 0); };
+  await player.start(1, {text:'hello'});
+  assert.equal(player.status(1).phase, 'playing');
+  await player.command(1, 'pause');
+  assert.equal(player.status(1).phase, 'paused');
+  await new Promise(resolve => setTimeout(resolve, 5));
+  // Chrome rejects a pending play() with AbortError when pause() arrives first.
+  audio.play = async () => { const error = new Error('interrupted'); error.name = 'AbortError'; throw error; };
+  await player.command(1, 'play');
+  assert.equal(player.status(1).phase, 'paused');
+  assert.equal(player.status(1).error, '');
+  player.stop(1);
+});
+test('restart rewinds the current chunk and rate applies to every chunk and later articles', async () => {
+  const {player, audio} = setup(async () => new Blob(['audio']));
+  await player.command(1, 'rate', 1.5);
+  assert.equal(audio.playbackRate, 1.5);
+  await player.start(1, {text:'First. Second.'}); await tick();
+  assert.equal(player.status(1).rate, 1.5);
+  audio.currentTime = 7;
+  await player.command(1, 'pause');
+  await player.command(1, 'restart');
+  assert.equal(audio.currentTime, 0);
+  assert.equal(player.status(1).phase, 'playing');
+  await player.command(1, 'rate', 9);
+  assert.equal(player.status(1).rate, 1.5);
+  audio.playbackRate = 1;
+  audio.dispatchEvent(new Event('ended')); await tick();
+  assert.equal(audio.playbackRate, 1.5);
+  player.stop(1);
+  await player.start(2, {text:'Other.', rate:0.7}); await tick();
+  assert.equal(player.status(2).rate, 0.7);
   player.stop(2);
 });

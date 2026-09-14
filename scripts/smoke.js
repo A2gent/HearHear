@@ -85,10 +85,17 @@ try {
   await eventually(async () => (await state()).phase === 'playing');
   await clickControl('BUTTON', 'Пауза');
   await eventually(async () => (await state()).phase === 'paused');
-  await clickControl('INPUT');
-  await eventually(async () => (await state()).currentTime > 5);
+  // Pausing right after play() must not surface an autoplay error; resume must work after a real wait.
+  await new Promise(r => setTimeout(r, 1500));
+  assert.equal((await state()).error, '');
   await clickControl('BUTTON', 'Слушать');
   await eventually(async () => (await state()).phase === 'playing');
+  await clickControl('BUTTON', 'Скорость 1x');
+  await eventually(async () => (await state()).rate === 1.2);
+  assert.equal((await worker.evaluate(() => chrome.storage.local.get('playbackRate'))).playbackRate, 1.2);
+  await eventually(async () => (await state()).currentTime > 0.5);
+  await clickControl('BUTTON', 'Сначала фрагмент');
+  await eventually(async () => (await state()).currentTime < 0.5 && (await state()).phase === 'playing');
   await eventually(() => requests.length === 2);
   assert.ok(requests.every(req => req.text.length <= 400));
   assert.match(requests[1].text, /^Это длинная/);
@@ -123,7 +130,7 @@ try {
   await page.locator('[data-chrome-sound]').waitFor();
   await eventually(async () => (await state()).phase === 'idle');
   assert.equal(await page.locator('[data-chrome-sound]').count(), 1);
-  console.log(extensionPath, 'PASS: popup settings, real MV3 load, fixed player during auto-scroll, closed-shadow trusted click, CSP, RU payload, loading, offscreen playback, pause, seek, bounded chunk prefetch, automatic advance, word highlighting, navigation cleanup.');
+  console.log(extensionPath, 'PASS: popup settings, real MV3 load, fixed player during auto-scroll, closed-shadow trusted click, CSP, RU payload, loading, offscreen playback, pause/resume, speed, restart, bounded chunk prefetch, automatic advance, word highlighting, navigation cleanup.');
 } finally {
   await context?.close(); server.closeAllConnections(); await new Promise(r => server.close(r));
   await rm(profile, {recursive:true, force:true});

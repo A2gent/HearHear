@@ -1,5 +1,8 @@
 import { createHighlighter } from './highlight.js';
 
+export const RATES = [0.7, 1, 1.2, 1.5, 2];
+export const formatRate = rate => `${String(rate).replace(/\.0$/, '')}x`;
+
 export function mountPlayer(article, send) {
   const doc = article.root.ownerDocument;
   const ru = article.language === 'ru';
@@ -7,20 +10,22 @@ export function mountPlayer(article, send) {
   const host = doc.createElement('div'); host.dataset.chromeSound = '';
   const shadow = host.attachShadow({mode:'closed'});
   const style = doc.createElement('style');
-  style.textContent = `:host{position:fixed!important;left:50%!important;bottom:16px!important;transform:translateX(-50%)!important;display:block!important;margin:0!important;width:min(720px,calc(100vw - 32px))!important;z-index:2147483647!important;color-scheme:light dark}*{box-sizing:border-box}.player{font:12px/1.2 system-ui,sans-serif;background:#182337;color:#f5f7ff;border:1px solid #60718c;border-radius:8px;padding:6px 8px;width:100%;max-width:720px;box-shadow:0 4px 18px #0006}.row{display:flex;align-items:center;gap:8px}.icon{cursor:pointer;border:1px solid #7284a0;border-radius:6px;background:#263a58;color:#fff;padding:0;width:28px;height:28px;min-width:28px;min-height:28px;display:grid;place-items:center;flex:0 0 auto}.icon:focus-visible,input:focus-visible{outline:3px solid #ffda69;outline-offset:2px}.icon:disabled{opacity:.65;cursor:wait}input{flex:1;min-width:80px;height:16px;accent-color:#8cbfff}.clock{font-variant-numeric:tabular-nums;white-space:nowrap;opacity:.85}.status{margin-top:4px;overflow-wrap:anywhere}.status:empty{display:none}.spinner{display:inline-block;width:12px;height:12px;border:2px solid #7d8ea8;border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.spinner{animation:none}}`;
+  style.textContent = `:host{position:fixed!important;left:50%!important;bottom:16px!important;transform:translateX(-50%)!important;display:block!important;margin:0!important;width:auto!important;max-width:min(720px,calc(100vw - 32px))!important;z-index:2147483647!important;color-scheme:light}*{box-sizing:border-box}.player{font:13px/1.2 system-ui,sans-serif;background:#fff;color:#1c2333;border:1px solid #0000000f;border-radius:40px;padding:8px 20px;box-shadow:0 10px 32px #0004,0 1px 3px #0002}.row{display:flex;align-items:center;justify-content:center;gap:14px}.icon{cursor:pointer;border:0;border-radius:50%;background:#eef1f6;color:#1c2333;padding:0;width:36px;height:36px;min-width:36px;display:grid;place-items:center;flex:0 0 auto;font:700 12px/1 system-ui,sans-serif;transition:background .15s,transform .15s}.icon:hover{background:#dfe5ee}.icon:active{transform:scale(.94)}.play{width:56px;height:56px;min-width:56px;background:#182337;color:#fff;box-shadow:0 4px 14px #18233766}.play:hover{background:#263a58}.speed{width:auto;min-width:44px;padding:0 12px;border-radius:18px;font-variant-numeric:tabular-nums}.icon:focus-visible{outline:3px solid #ffda69;outline-offset:2px}.icon:disabled{opacity:.65;cursor:wait}.status{margin-top:6px;text-align:center;overflow-wrap:anywhere}.status:empty{display:none}.spinner{display:inline-block;width:18px;height:18px;border:3px solid #7d8ea8;border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.spinner{animation:none}.icon{transition:none}}`;
   const box = doc.createElement('section'); box.className = 'player'; box.setAttribute('aria-label', ru ? 'Озвучивание статьи' : 'Article audio');
   const row = doc.createElement('div'); row.className = 'row';
-  const play = doc.createElement('button'); play.type = 'button'; play.className = 'icon';
-  const seek = doc.createElement('input'); seek.type = 'range'; seek.min = '0'; seek.max = '0'; seek.step = '.1'; seek.value = '0'; seek.disabled = true; seek.setAttribute('aria-label', ru ? 'Перемотка аудио' : 'Seek audio');
-  const clock = doc.createElement('span'); clock.className = 'clock'; clock.textContent = '0:00 / 0:00';
+  const restart = doc.createElement('button'); restart.type = 'button'; restart.className = 'icon';
+  restart.setAttribute('aria-label', ru ? 'Сначала фрагмент' : 'Restart chunk'); restart.title = restart.getAttribute('aria-label');
+  restart.append(icon('M12 5V2L7 6l5 4V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z'));
+  const play = doc.createElement('button'); play.type = 'button'; play.className = 'icon play';
+  const speed = doc.createElement('button'); speed.type = 'button'; speed.className = 'icon speed';
+  speed.title = ru ? 'Скорость воспроизведения' : 'Playback speed';
   const status = doc.createElement('div'); status.className = 'status'; status.setAttribute('role','status');
-  row.append(play, seek, clock); box.append(row, status); shadow.append(style, box);
+  row.append(restart, play, speed); box.append(row, status); shadow.append(style, box);
   (doc.body || doc.documentElement).append(host);
-  let state = {phase:'idle'}; let busy = false; let disposed = false; let dragging = false; let requestRevision = 0;
-  const format = seconds => `${Math.floor((seconds || 0) / 60)}:${String(Math.floor((seconds || 0) % 60)).padStart(2,'0')}`;
+  let state = {phase:'idle'}; let busy = false; let disposed = false; let requestRevision = 0; let rate = 1;
   function icon(d) {
     const svg = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('width', '14'); svg.setAttribute('height', '14'); svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('width', '20'); svg.setAttribute('height', '20'); svg.setAttribute('aria-hidden', 'true');
     const path = doc.createElementNS('http://www.w3.org/2000/svg', 'path'); path.setAttribute('fill', 'currentColor'); path.setAttribute('d', d); svg.append(path);
     return svg;
   }
@@ -28,51 +33,56 @@ export function mountPlayer(article, send) {
     if (disposed || !next) return;
     state = next;
     highlighter.update(state);
+    if (RATES.includes(state.rate)) rate = state.rate;
     const loading = state.phase === 'loading';
+    const active = ['playing','paused'].includes(state.phase);
     play.replaceChildren();
     if (loading) { const spinner = doc.createElement('span'); spinner.className = 'spinner'; spinner.setAttribute('aria-hidden','true'); play.append(spinner); }
     else play.append(icon(state.phase === 'playing' ? 'M6 5h4v14H6zm8 0h4v14h-4z' : 'M8 5v14l11-7z'));
     const label = loading ? (ru ? 'Готовим аудио' : 'Generating audio') : state.phase === 'playing' ? (ru ? 'Пауза' : 'Pause') : (ru ? 'Слушать' : 'Play');
     play.setAttribute('aria-label', label); play.disabled = loading; box.setAttribute('aria-busy', String(loading));
-    seek.disabled = !state.duration || loading;
-    seek.max = String(state.duration || 0);
-    if (!dragging) seek.value = String(state.currentTime || 0);
-    const chunk = state.chunkCount ? `${state.chunkIndex + 1}/${state.chunkCount} · ` : '';
-    clock.textContent = `${chunk}${format(state.currentTime)} / ${format(state.duration)}`;
-    clock.title = ru ? 'Фрагмент и время внутри него. Подсветка слов приблизительная.' : 'Chunk and time within it. Word highlighting is approximate.';
-    seek.setAttribute('aria-label', ru ? 'Перемотка внутри фрагмента' : 'Seek within chunk');
-    // Keep the bar to one row; settings and TTS disclosure live in the toolbar popup.
+    restart.disabled = !active;
+    speed.textContent = formatRate(rate);
+    speed.setAttribute('aria-label', `${ru ? 'Скорость' : 'Speed'} ${formatRate(rate)}`);
     status.textContent = state.error || '';
   }
   async function request(action, extra = {}) {
     const revision = action === 'status' ? requestRevision : ++requestRevision;
+    let timer;
     try {
-      const next = await send({action, ...extra});
+      // A lost reply (worker restart) must not leave the controls stuck as busy.
+      const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), 15000); });
+      const next = await Promise.race([send({action, ...extra}), timeout]);
       // A status request started before a user command must not restore stale UI.
       if (revision === requestRevision) render(next);
     }
     catch {
       if (revision === requestRevision) render({phase:'error', error:ru ? 'Brute недоступен или расширение перезагружено. Проверьте настройки в меню расширения и обновите страницу.' : 'Brute unavailable or extension reloaded. Open the toolbar popup to check settings, then reload this page.'});
     }
+    finally { clearTimeout(timer); }
   }
-  play.addEventListener('click', async event => {
+  async function guarded(event, run) {
     if (!event.isTrusted || busy) return;
     busy = true;
-    try {
-      if (['idle','error'].includes(state.phase)) {
-        render({phase:'loading'});
-        await request('start', {text:article.text, language:article.language});
-      } else {
-        // Reflect pause immediately while the command crosses two extension contexts.
-        if (state.phase === 'playing') render({...state, phase:'paused'});
-        await request('toggle');
-      }
-    } finally { busy = false; }
-  });
-  seek.addEventListener('pointerdown', () => { dragging = true; });
-  seek.addEventListener('pointerup', () => { dragging = false; });
-  seek.addEventListener('blur', () => { dragging = false; });
-  seek.addEventListener('change', event => { if (event.isTrusted) void request('seek', {value:Number(seek.value)}); });
+    try { await run(); } finally { busy = false; }
+  }
+  play.addEventListener('click', event => guarded(event, async () => {
+    if (['idle','error'].includes(state.phase)) {
+      render({phase:'loading'});
+      await request('start', {text:article.text, language:article.language});
+    } else if (state.phase === 'playing') {
+      // Explicit play/pause (not toggle) so a stale UI phase cannot invert the user's intent.
+      // Reflect pause immediately while the command crosses two extension contexts.
+      render({...state, phase:'paused'});
+      await request('pause');
+    } else await request('play');
+  }));
+  restart.addEventListener('click', event => guarded(event, () => request('restart')));
+  speed.addEventListener('click', event => guarded(event, () => {
+    rate = RATES[(RATES.indexOf(rate) + 1) % RATES.length];
+    speed.textContent = formatRate(rate);
+    return request('rate', {value:rate});
+  }));
   render(state);
   let polling = false;
   const timer = setInterval(async () => {

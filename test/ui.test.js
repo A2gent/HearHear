@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { mountPlayer } from '../src/ui.js';
+import { mountPlayer, RATES, formatRate } from '../src/ui.js';
 
-function mount(language = 'en') {
+function mount(language = 'en', send = async () => ({phase:'idle'})) {
   const dom = new JSDOM('<article><h1>Title</h1><p>Hello</p></article>');
   const {document, Element} = dom.window;
   const shadows = new WeakMap();
@@ -13,73 +13,107 @@ function mount(language = 'en') {
     shadows.set(this, root);
     return root;
   };
-  const player = mountPlayer({root:document.querySelector('article'), language, text:'Hello'}, async () => ({phase:'idle'}));
-  return {root:shadows.get(player.host), player};
+  // Closed shadow roots hide listeners; capture click handlers by button label order.
+  const clicks = new Map();
+  const listen = Element.prototype.addEventListener;
+  Element.prototype.addEventListener = function(type, listener, options) {
+    if (this.tagName === 'BUTTON' && type === 'click') clicks.set(this, listener);
+    return listen.call(this, type, listener, options);
+  };
+  const player = mountPlayer({root:document.querySelector('article'), language, text:'Hello'}, send);
+  const root = shadows.get(player.host);
+  const [restart, play, speed] = root.querySelectorAll('button');
+  return {root, player, dom, restart, play, speed, click:button => clicks.get(button)({isTrusted:true})};
 }
 
-test('idle player is a compact icon row without stop or settings', () => {
-  const {root, player} = mount();
+test('idle player is restart, big circular play and speed on a white card without seek or clock', () => {
+  const {root, player, restart, play, speed} = mount();
   try {
-    const buttons = [...root.querySelectorAll('button')];
-    assert.equal(buttons.length, 1);
-    assert.equal(buttons[0].getAttribute('aria-label'), 'Play');
-    assert.equal(buttons[0].textContent.trim(), '');
-    assert.ok(buttons[0].querySelector('svg path'));
-    assert.match(buttons[0].querySelector('svg path').getAttribute('d'), /M8 5v14l11-7/);
+    assert.equal(root.querySelectorAll('button').length, 3);
+    assert.equal(restart.getAttribute('aria-label'), 'Restart chunk');
+    assert.equal(restart.disabled, true);
+    assert.equal(play.getAttribute('aria-label'), 'Play');
+    assert.equal(play.textContent.trim(), '');
+    assert.match(play.querySelector('svg path').getAttribute('d'), /M8 5v14l11-7/);
+    assert.equal(speed.textContent, '1x');
+    assert.equal(root.querySelector('input'), null);
+    assert.equal(root.querySelector('.clock'), null);
     assert.equal(root.querySelector('.status').textContent, '');
-    assert.equal(buttons.some(button => /Stop|Settings|Стоп|Настройки/.test(button.textContent)), false);
     const css = root.querySelector('style').textContent;
-    assert.match(css, /padding:6px 8px/);
-    assert.match(css, /width:28px;height:28px/);
+    assert.match(css, /\.player\{[^}]*background:#fff/);
+    assert.match(css, /\.player\{[^}]*box-shadow/);
+    assert.match(css, /\.icon\{[^}]*border-radius:50%/);
+    assert.match(css, /\.play\{[^}]*width:56px;height:56px/);
     assert.match(css, /:host\{[^}]*position:fixed!important/);
     assert.match(css, /bottom:16px!important/);
     assert.match(css, /z-index:2147483647!important/);
   } finally { player.destroy(); }
 });
 
-test('Russian player keeps accessible play label on the icon', () => {
-  const {root, player} = mount('ru');
+test('Russian player keeps accessible labels', () => {
+  const {player, restart, play} = mount('ru');
   try {
-    const play = root.querySelector('button');
     assert.equal(play.getAttribute('aria-label'), 'Слушать');
+    assert.equal(restart.getAttribute('aria-label'), 'Сначала фрагмент');
     assert.ok(play.querySelector('svg'));
-    assert.equal(root.querySelectorAll('button').length, 1);
+  } finally { player.destroy(); }
+});
+
+test('speed cycles 0.7x -> 2x in a loop and is sent as a rate command', async () => {
+  const calls = [];
+  const {player, speed, click} = mount('en', async message => { calls.push(message); return {phase:'idle'}; });
+  try {
+    assert.deepEqual(RATES, [0.7, 1, 1.2, 1.5, 2]);
+    const seen = [];
+    for (let i = 0; i < RATES.length + 1; i++) { await click(speed); seen.push(speed.textContent); }
+    assert.deepEqual(seen, ['1.2x', '1.5x', '2x', '0.7x', '1x', '1.2x']);
+    assert.deepEqual(calls.filter(call => call.action === 'rate').map(call => call.value), [1.2, 1.5, 2, 0.7, 1, 1.2]);
+    assert.equal(formatRate(1), '1x');
+  } finally { player.destroy(); }
+});
+
+test('play sends explicit play/pause and restart rewinds the chunk', async () => {
+  const calls = [];
+  let phase = 'playing';
+  const {player, restart, play, click} = mount('en', async message => {
+    calls.push(message.action);
+    if (message.action === 'pause') phase = 'paused';
+    if (message.action === 'play') phase = 'playing';
+    return {phase, duration:10, currentTime:1, rate:1.5};
+  });
+  try {
+    await click(play);
+    assert.deepEqual(calls, ['start']);
+    assert.equal(play.getAttribute('aria-label'), 'Pause');
+    assert.equal(restart.disabled, false);
+    await click(play);
+    assert.equal(calls.at(-1), 'pause');
+    assert.equal(play.getAttribute('aria-label'), 'Play');
+    await click(play);
+    assert.equal(calls.at(-1), 'play');
+    assert.equal(play.getAttribute('aria-label'), 'Pause');
+    await click(restart);
+    assert.equal(calls.at(-1), 'restart');
+    assert.equal(player.host.isConnected, true);
   } finally { player.destroy(); }
 });
 
 test('latest command response wins over an older status poll', async () => {
-  const dom = new JSDOM('<article><h1>Title</h1><p>Hello</p></article>');
-  const {document, Element} = dom.window;
-  const shadows = new WeakMap();
-  const attach = Element.prototype.attachShadow;
-  Element.prototype.attachShadow = function(init) {
-    const root = attach.call(this, init);
-    shadows.set(this, root);
-    return root;
-  };
-  let click;
-  const listen = Element.prototype.addEventListener;
-  Element.prototype.addEventListener = function(type, listener, options) {
-    if (this.tagName === 'BUTTON' && type === 'click') click = listener;
-    return listen.call(this, type, listener, options);
-  };
   let resolveStatus;
   const statusPending = new Promise(resolve => { resolveStatus = resolve; });
   const calls = [];
-  const player = mountPlayer({root:document.querySelector('article'), language:'en', text:'Hello'}, async message => {
+  const {player, play, click, dom} = mount('en', async message => {
     calls.push(message.action);
     if (message.action === 'start') return {phase:'playing', duration:10, currentTime:1};
     if (message.action === 'status') return statusPending;
-    if (message.action === 'toggle') return {phase:'paused', duration:10, currentTime:2};
+    if (message.action === 'pause') return {phase:'paused', duration:10, currentTime:2};
     return {phase:'idle'};
   });
-  const root = shadows.get(player.host);
-  const play = root.querySelector('button');
   try {
-    await click({isTrusted:true});
+    await click(play);
     await new Promise(resolve => setTimeout(resolve, 120));
     assert.ok(calls.includes('status'));
-    await click({isTrusted:true});
+    await click(play);
     assert.equal(play.getAttribute('aria-label'), 'Play');
     resolveStatus({phase:'playing', duration:10, currentTime:3});
     await new Promise(resolve => setTimeout(resolve, 0));

@@ -4,7 +4,7 @@ export class Player {
   constructor(audio, synthesize, urls = URL) {
     this.audio = audio; this.synthesize = synthesize; this.urls = urls;
     this.owner = null; this.phase = 'idle'; this.error = ''; this.generation = 0;
-    this.chunks = []; this.cache = new Map(); this.index = 0;
+    this.chunks = []; this.cache = new Map(); this.index = 0; this.rate = 1;
     for (const event of ['play', 'pause', 'ended', 'error']) audio.addEventListener(event, () => {
       if (!this.url) return;
       if (event === 'ended' && this.index + 1 < this.chunks.length) {
@@ -21,7 +21,7 @@ export class Player {
     const duration = this.url && Number.isFinite(this.audio.duration) ? this.audio.duration : 0;
     const currentTime = this.url ? this.audio.currentTime || 0 : 0;
     const word = ['playing','paused'].includes(this.phase) ? wordAtTime(this.chunks[this.index], currentTime, duration) : null;
-    return {phase:this.phase, error:this.error, currentTime, duration,
+    return {phase:this.phase, error:this.error, currentTime, duration, rate:this.rate,
       chunkIndex:this.index, chunkCount:this.chunks.length, wordStart:word?.start ?? null, wordEnd:word?.end ?? null};
   }
   releaseAudio() {
@@ -46,6 +46,7 @@ export class Player {
       if (typeof request.text !== 'string' || !request.text.trim() || request.text.length > 60000) throw new Error('Invalid article.');
       this.chunks = splitChunks(request.text, request.language);
       this.request = request;
+      if (request.rate) this.setRate(request.rate);
       await this.activate(0, generation);
     } catch (error) {
       if (generation !== this.generation) return;
@@ -79,29 +80,41 @@ export class Player {
     if (result.error) { this.phase = 'error'; this.error = result.error.message; return; }
     this.url = this.urls.createObjectURL(result.blob);
     this.audio.src = this.url;
-    this.audio.currentTime = 0;
+    this.audio.currentTime = 0; this.audio.playbackRate = this.rate;
     await this.play(generation);
   }
   async play(generation = this.generation) {
     try { await this.audio.play(); }
-    catch {
+    catch (error) {
       if (generation !== this.generation) return;
       this.phase = 'paused';
-      this.error = 'Press play to allow audio. / Нажмите воспроизведение ещё раз.';
+      // pause() before playback started rejects play() with AbortError; that is the user's pause, not a policy block.
+      if (error?.name !== 'AbortError') this.error = 'Press play to allow audio. / Нажмите воспроизведение ещё раз.';
     }
   }
+  setRate(value) {
+    if (!Number.isFinite(value) || value < 0.5 || value > 3) return;
+    this.rate = value;
+    // load() resets playbackRate to defaultPlaybackRate, so set both for later chunks.
+    this.audio.defaultPlaybackRate = value; this.audio.playbackRate = value;
+  }
   async command(owner, action, value) {
+    if (action === 'rate') { this.setRate(value); return; }
     if (owner !== this.owner) return;
     if (action === 'stop') { this.stop(owner); return; }
     if (!this.url) return;
-    if (action === 'toggle') {
+    if (action === 'pause') {
       this.error = '';
-      if (this.phase === 'playing') this.audio.pause();
-      else {
-        if (this.phase === 'ended' && this.chunks.length > 1) { await this.start(owner, this.request); return; }
-        if (this.phase === 'ended') this.audio.currentTime = 0;
-        await this.play();
-      }
+      this.audio.pause();
+      // The pause event is dispatched later; report the new phase now so the reply is not stale.
+      if (this.phase === 'playing') this.phase = 'paused';
+    }
+    if (action === 'restart') { this.error = ''; this.audio.currentTime = 0; await this.play(); }
+    if (action === 'play') {
+      this.error = '';
+      if (this.phase === 'ended' && this.chunks.length > 1) { await this.start(owner, this.request); return; }
+      if (this.phase === 'ended') this.audio.currentTime = 0;
+      if (this.phase !== 'playing') await this.play();
     }
     if (action === 'seek' && Number.isFinite(value) && Number.isFinite(this.audio.duration)) this.audio.currentTime = Math.max(0, Math.min(value, this.audio.duration));
   }
