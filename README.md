@@ -49,9 +49,10 @@ Response: raw audio bytes, e.g. `audio/mpeg` or `audio/mp4`. Auto ranking is Ele
 - Once a chunk starts playing, exactly one following chunk may be synthesized ahead. Completing that request does not drain the rest of the article into the queue. Pausing does not start further requests, although an already-running prefetch may finish.
 - Playback advances automatically. If the next chunk is still generating, the player displays the loader until it is ready. Navigation, tab close, or another article cancels current/prefetched synthesis.
 - The slider seeks **within the current chunk**, not the whole article. Completed chunks are discarded to bound audio memory. Replaying a completed multi-chunk article synthesizes it again.
-- The spoken word is highlighted on the original page without inserting wrappers or rewriting content. Normalized text is mapped back to its text nodes, including inline formatting. Generated labels such as “Code” have no source word and are not highlighted.
+- The spoken word is highlighted on the original page without inserting wrappers or rewriting content. Normalized text is mapped back to its text nodes, including inline formatting. Generated labels such as “Code” have no source word and are not highlighted. The player stays fixed at the bottom of the viewport while the article scrolls.
+- The page automatically follows playback when the highlighted word leaves the central reading area. Scrolling is smooth and only happens near the top or bottom of the viewport, so every word does not trigger page movement.
 - **Timing is approximate:** Brute currently returns only raw audio, not word timestamps. Word duration is estimated by text length within each chunk, so alignment resets at each boundary. Pausing freezes the highlight; seeking updates it. Exact synchronization requires backend word timestamps/forced alignment.
-- Word highlighting requires the CSS Custom Highlight API (current Chrome); playback still works without it. It does not automatically scroll the page.
+- Word highlighting and automatic reading-position scrolling require the CSS Custom Highlight API (current Chrome); playback still works without them.
 
 ## Reading rules
 

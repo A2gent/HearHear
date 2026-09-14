@@ -9,6 +9,17 @@ test('maps cleaned words across inline nodes without changing article DOM', () =
   const d = dom.window.document; const article = extractArticle(d);
   const before = article.root.innerHTML;
   const registry = new Map();
+  const scrolls = [];
+  dom.window.scrollTo = options => scrolls.push(options);
+  dom.window.scrollY = 40;
+  dom.window.matchMedia = () => ({matches:false});
+  dom.window.innerHeight = 800;
+  const createRange = d.createRange.bind(d);
+  d.createRange = () => {
+    const range = createRange();
+    range.getBoundingClientRect = () => ({top:700, bottom:720});
+    return range;
+  };
   dom.window.CSS = {highlights:registry};
   dom.window.Highlight = class {constructor(...ranges) {this.ranges = ranges;}};
   const highlighter = createHighlighter(article);
@@ -18,6 +29,7 @@ test('maps cleaned words across inline nodes without changing article DOM', () =
     return registry.get('hearhear-word')?.ranges.map(r => r.toString()).join('');
   };
   assert.equal(show('Hello'), 'Hello');
+  assert.deepEqual(scrolls, [{top:340, behavior:'smooth'}]);
   assert.equal(show('HDR'), 'HDR');
   assert.equal(show('fine'), 'ﬁne');
   assert.equal(show('Code'), undefined, 'synthetic summaries have no source word');

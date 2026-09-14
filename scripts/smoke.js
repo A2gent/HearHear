@@ -42,9 +42,14 @@ try {
   assert.equal(await popup.locator('#model').inputValue(), 'auto');
   await popup.close();
   const page = await context.newPage();
-  await page.route('https://article.test/**', route => route.fulfill({contentType:'text/html; charset=utf-8', headers:{'Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'"}, body:`<html lang="ru"><h1>Тест</h1><article><h1>Статья о фотографии</h1><p>${'Это длинная русская статья о форматах фотографий и технологиях обработки изображений. '.repeat(8)}</p><pre>secret code</pre></article></html>`}));
+  await page.route('https://article.test/**', route => route.fulfill({contentType:'text/html; charset=utf-8', headers:{'Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'"}, body:`<html lang="ru"><h1>Тест</h1><div style="height:1200px"></div><article><h1>Статья о фотографии</h1><p>${'Это длинная русская статья о форматах фотографий и технологиях обработки изображений. '.repeat(8)}</p><pre>secret code</pre></article></html>`}));
   await page.goto('https://article.test/one');
   await page.locator('[data-chrome-sound]').waitFor();
+  const playerPosition = await page.locator('[data-chrome-sound]').evaluate(host => {
+    const rect = host.getBoundingClientRect();
+    return {position:getComputedStyle(host).position, bottom:Math.round(innerHeight - rect.bottom)};
+  });
+  assert.deepEqual(playerPosition, {position:'fixed', bottom:16});
   assert.equal(requests.length, 0, 'must not send before a click');
   const cdp = await context.newCDPSession(page);
   async function clickControl(tag, label) {
@@ -96,6 +101,12 @@ try {
     return result.result.value;
   };
   await eventually(async () => Boolean(await highlighted()));
+  await eventually(async () => await page.evaluate(() => scrollY > 0));
+  const fixedAfterScroll = await page.locator('[data-chrome-sound]').evaluate(host => {
+    const rect = host.getBoundingClientRect();
+    return Math.round(innerHeight - rect.bottom);
+  });
+  assert.equal(fixedAfterScroll, 16);
   await page.screenshot({path:'dist/smoke-player.png'});
   const command = (action, value) => worker.evaluate(({owner, action, value}) => chrome.runtime.sendMessage({target:'offscreen', owner, action, value}), {owner, action, value});
   await command('seek', 19.9);
@@ -112,7 +123,7 @@ try {
   await page.locator('[data-chrome-sound]').waitFor();
   await eventually(async () => (await state()).phase === 'idle');
   assert.equal(await page.locator('[data-chrome-sound]').count(), 1);
-  console.log(extensionPath, 'PASS: popup settings, real MV3 load, closed-shadow trusted click, CSP, RU payload, loading, offscreen playback, pause, seek, bounded chunk prefetch, automatic advance, word highlighting, navigation cleanup.');
+  console.log(extensionPath, 'PASS: popup settings, real MV3 load, fixed player during auto-scroll, closed-shadow trusted click, CSP, RU payload, loading, offscreen playback, pause, seek, bounded chunk prefetch, automatic advance, word highlighting, navigation cleanup.');
 } finally {
   await context?.close(); server.closeAllConnections(); await new Promise(r => server.close(r));
   await rm(profile, {recursive:true, force:true});

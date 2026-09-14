@@ -19,3 +19,4 @@
 - Reviewer delegation can fail due to project binding or exhausted provider credits. Record the limitation and perform local review/tests rather than changing agent configuration or retrying indefinitely.
 - Browser HTML fixtures containing Cyrillic must declare UTF-8. Otherwise Chromium decodes them as Windows-1252 and payload/highlight assertions test mojibake instead of Russian text.
 - Do not spread article-sized arrays into `push`: extraction runs before the 60,000-character check, and oversized pages can exceed the engine argument limit. Copy source-map entries with loops instead.
+- Insert new top-level tests only after verifying surrounding braces; a nested `node:test` plus an active UI interval can hide the syntax mistake as a timeout.

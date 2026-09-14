@@ -40,6 +40,13 @@ export function createHighlighter(article) {
       }
       registry.set('hearhear-word', new view.Highlight(...ranges));
       previous = key;
+      const rect = ranges[0]?.getBoundingClientRect();
+      const viewportHeight = view.innerHeight || doc.documentElement.clientHeight;
+      if (rect && rect.bottom > rect.top && (rect.top < viewportHeight * .2 || rect.bottom > viewportHeight * .8)) {
+        // Keep the word in a stable reading band without moving the viewport on every update.
+        const behavior = view.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+        view.scrollTo({top:view.scrollY + rect.top - viewportHeight / 2, behavior});
+      }
     },
     destroy() { clear(); style.remove(); },
   };
