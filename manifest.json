@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "HearHear by Agent ²",
+  "short_name": "HearHear",
+  "version": "0.1.0",
+  "description": "Read articles aloud through your local Brute Speech API. Russian and English supported.",
+  "minimum_chrome_version": "116",
+  "icons": {
+    "16": "icons/hearhear-16.png",
+    "32": "icons/hearhear-32.png",
+    "48": "icons/hearhear-48.png",
+    "128": "icons/hearhear-128.png"
+  },
+  "permissions": ["storage", "offscreen"],
+  "host_permissions": ["http://localhost/*", "http://127.0.0.1/*", "http://[::1]/*", "https://localhost/*", "https://127.0.0.1/*", "https://[::1]/*"],
+  "background": {"service_worker": "dist/background.js", "type": "module"},
+  "content_scripts": [{"matches": ["http://*/*", "https://*/*"], "js": ["dist/content.js"], "run_at": "document_idle", "all_frames": false}],
+  "action": {
+    "default_title": "HearHear by Agent ²",
+    "default_popup": "dist/popup.html",
+    "default_icon": {
+      "16": "icons/hearhear-16.png",
+      "32": "icons/hearhear-32.png",
+      "48": "icons/hearhear-48.png",
+      "128": "icons/hearhear-128.png"
+    }
+  },
+  "options_page": "dist/options.html",
+  "content_security_policy": {"extension_pages": "script-src 'self'; object-src 'none'; media-src 'self' blob:; connect-src http://localhost:* http://127.0.0.1:* http://[::1]:* https://localhost:* https://127.0.0.1:* https://[::1]:*"}
+}

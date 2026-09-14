@@ -1,0 +1,21 @@
+{
+  "name": "hearhear",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "lint": "eslint src test scripts",
+    "build": "node scripts/build.js",
+    "check": "npm test && npm run lint && npm run build",
+    "test:browser": "npm run build && node scripts/smoke.js . && node scripts/smoke.js dist"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "esbuild": "^0.25.0",
+    "eslint": "^9.39.0",
+    "globals": "^16.5.0",
+    "jsdom": "^26.1.0",
+    "playwright": "^1.63.0"
+  }
+}

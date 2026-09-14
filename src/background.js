@@ -1,0 +1,51 @@
+import { validateBaseURL } from './speech.js';
+let creating;
+const revisions = new Map();
+function invalidate(owner) {
+  const revision = (revisions.get(owner) || 0) + 1;
+  revisions.set(owner, revision);
+  return revision;
+}
+async function ensureOffscreen() {
+  if (await chrome.offscreen.hasDocument()) return;
+  if (!creating) creating = chrome.offscreen.createDocument({
+    // Resolve beside the bundled worker for both root and dist installations.
+    url:new URL('offscreen.html', import.meta.url).href, reasons:['BLOBS'],
+    // TTS may take >30s: AUDIO_PLAYBACK's silence timeout would kill synthesis.
+    // This document owns the generated Blob URL and releases it on stop/unload.
+    justification:'Fetch generated speech blobs, own their object URLs, and play them until the user stops.',
+  }).finally(() => { creating = null; });
+  await creating;
+}
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.storage.local.setAccessLevel({accessLevel:'TRUSTED_CONTEXTS'});
+});
+chrome.runtime.onMessage.addListener((message, sender, reply) => {
+  if (message?.target !== 'background' || sender.id !== chrome.runtime.id || !sender.tab || sender.frameId !== 0) return;
+  const owner = sender.tab.id;
+  const allowed = ['start','status','toggle','seek','stop'];
+  if (!allowed.includes(message.action)) return;
+  (async () => {
+    if (message.action === 'start') {
+      if (typeof message.text !== 'string' || !message.text.trim() || message.text.length > 60000 || !['ru','en'].includes(message.language)) throw new Error('Invalid article.');
+      const revision = invalidate(owner);
+      await ensureOffscreen();
+      const {baseURL, speechModel} = await chrome.storage.local.get(['baseURL', 'speechModel']);
+      // Stop/navigation may arrive while the offscreen document is being created.
+      if (revisions.get(owner) !== revision) return {phase:'idle'};
+      return chrome.runtime.sendMessage({target:'offscreen', action:'start', owner, text:message.text, language:message.language, model:speechModel, baseURL:validateBaseURL(baseURL)});
+    }
+    if (message.action === 'stop') invalidate(owner);
+    if (!await chrome.offscreen.hasDocument()) return {phase:'idle'};
+    return chrome.runtime.sendMessage({target:'offscreen', action:message.action, owner, value:message.value});
+  })().then(reply, error => reply({phase:'error', error:error.message}));
+  return true;
+});
+async function stopTab(owner) {
+  invalidate(owner);
+  if (await chrome.offscreen.hasDocument()) await chrome.runtime.sendMessage({target:'offscreen', action:'stop', owner});
+}
+chrome.tabs.onRemoved.addListener(id => { void stopTab(id).catch(() => {}); });
+chrome.tabs.onUpdated.addListener((id, change) => {
+  if (change.status === 'loading') void stopTab(id).catch(() => {});
+});
