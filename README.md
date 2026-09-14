@@ -6,6 +6,7 @@ HearHear is part of the Agent ² / A2gent workspace. It does not talk to remote 
 
 
 
+<img width="1018" height="504" alt="Screenshot 2026-09-15 at 01 24 32" src="https://github.com/user-attachments/assets/bfdeeb75-f80c-4209-8e49-da4f17cdde28" />
 
 https://github.com/user-attachments/assets/f5a12ad4-9380-436f-8abe-87c5c35d10e1
 
