@@ -1,6 +1,9 @@
+import { createHighlighter } from './highlight.js';
+
 export function mountPlayer(article, send) {
   const doc = article.root.ownerDocument;
   const ru = article.language === 'ru';
+  const highlighter = createHighlighter(article);
   const host = doc.createElement('div'); host.dataset.chromeSound = '';
   const shadow = host.attachShadow({mode:'closed'});
   const style = doc.createElement('style');
@@ -25,6 +28,7 @@ export function mountPlayer(article, send) {
   function render(next) {
     if (disposed || !next) return;
     state = next;
+    highlighter.update(state);
     const loading = state.phase === 'loading';
     play.replaceChildren();
     if (loading) { const spinner = doc.createElement('span'); spinner.className = 'spinner'; spinner.setAttribute('aria-hidden','true'); play.append(spinner); }
@@ -34,7 +38,10 @@ export function mountPlayer(article, send) {
     seek.disabled = !state.duration || loading;
     seek.max = String(state.duration || 0);
     if (!dragging) seek.value = String(state.currentTime || 0);
-    clock.textContent = `${format(state.currentTime)} / ${format(state.duration)}`;
+    const chunk = state.chunkCount ? `${state.chunkIndex + 1}/${state.chunkCount} · ` : '';
+    clock.textContent = `${chunk}${format(state.currentTime)} / ${format(state.duration)}`;
+    clock.title = ru ? 'Фрагмент и время внутри него. Подсветка слов приблизительная.' : 'Chunk and time within it. Word highlighting is approximate.';
+    seek.setAttribute('aria-label', ru ? 'Перемотка внутри фрагмента' : 'Seek within chunk');
     // Keep the bar to one row; settings and TTS disclosure live in the toolbar popup.
     status.textContent = state.error || '';
   }
@@ -62,6 +69,6 @@ export function mountPlayer(article, send) {
     if (disposed || polling || busy || state.phase === 'idle' || state.phase === 'error') return;
     polling = true;
     try { await request('status'); } finally { polling = false; }
-  }, 400);
-  return {host, destroy() { disposed = true; clearInterval(timer); host.remove(); void send({action:'stop'}).catch(() => {}); }};
+  }, 100);
+  return {host, destroy() { disposed = true; clearInterval(timer); highlighter.destroy(); host.remove(); void send({action:'stop'}).catch(() => {}); }};
 }

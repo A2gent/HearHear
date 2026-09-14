@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path';
 import assert from 'node:assert/strict';
 const extensionPath = resolve(process.argv[2] || 'dist');
 const requests = [];
-let answer;
+const answers = [];
 const wav = Buffer.alloc(44 + 8000 * 2 * 20);
 wav.write('RIFF'); wav.writeUInt32LE(wav.length - 8, 4); wav.write('WAVEfmt ', 8);
 wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22);
@@ -21,7 +21,7 @@ const server = createServer(async (req, res) => {
   }
   assert.equal(req.url, '/speech/completion');
   requests.push(JSON.parse(body));
-  answer = () => { res.writeHead(200, {'Content-Type':'audio/wav'}); res.end(wav); };
+  answers.push(() => { res.writeHead(200, {'Content-Type':'audio/wav'}); res.end(wav); });
 });
 await new Promise(r => server.listen(0, '127.0.0.1', r));
 const profile = await mkdtemp(join(tmpdir(), 'article-sound-'));
@@ -42,7 +42,7 @@ try {
   assert.equal(await popup.locator('#model').inputValue(), 'auto');
   await popup.close();
   const page = await context.newPage();
-  await page.route('https://article.test/**', route => route.fulfill({contentType:'text/html', headers:{'Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'"}, body:`<html lang="ru"><h1>Тест</h1><article><h1>Статья о фотографии</h1><p>${'Это длинная русская статья о форматах фотографий и технологиях обработки изображений. '.repeat(8)}</p><pre>secret code</pre></article></html>`}));
+  await page.route('https://article.test/**', route => route.fulfill({contentType:'text/html; charset=utf-8', headers:{'Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'"}, body:`<html lang="ru"><h1>Тест</h1><article><h1>Статья о фотографии</h1><p>${'Это длинная русская статья о форматах фотографий и технологиях обработки изображений. '.repeat(8)}</p><pre>secret code</pre></article></html>`}));
   await page.goto('https://article.test/one');
   await page.locator('[data-chrome-sound]').waitFor();
   assert.equal(requests.length, 0, 'must not send before a click');
@@ -72,9 +72,9 @@ try {
   const state = () => worker.evaluate(owner => chrome.runtime.sendMessage({target:'offscreen', action:'status', owner}), owner);
   await clickControl('BUTTON', 'Слушать');
   await eventually(() => requests.length === 1);
-  assert.equal(requests[0].language, 'ru'); assert.match(requests[0].text, /Код/); assert.doesNotMatch(requests[0].text, /secret code/);
+  assert.equal(requests[0].language, 'ru'); assert.equal(requests[0].text, 'Статья о фотографии'); assert.doesNotMatch(requests[0].text, /secret code/);
   assert.equal((await state()).phase, 'loading');
-  answer();
+  answers[0]();
   await eventually(async () => ['playing','paused'].includes((await state()).phase));
   if ((await state()).phase === 'paused') await clickControl('BUTTON', 'Слушать');
   await eventually(async () => (await state()).phase === 'playing');
@@ -84,13 +84,35 @@ try {
   await eventually(async () => (await state()).currentTime > 5);
   await clickControl('BUTTON', 'Слушать');
   await eventually(async () => (await state()).phase === 'playing');
-  assert.equal(requests.length, 1);
+  await eventually(() => requests.length === 2);
+  assert.ok(requests.every(req => req.text.length <= 400));
+  assert.match(requests[1].text, /^Это длинная/);
+  // CSS Highlight registry is inspected in the content script's isolated world.
+  await cdp.send('Runtime.enable');
+  const {frameTree} = await cdp.send('Page.getFrameTree');
+  const {executionContextId} = await cdp.send('Page.createIsolatedWorld', {frameId:frameTree.frame.id, worldName:'hearhear-smoke'});
+  const highlighted = async () => {
+    const result = await cdp.send('Runtime.evaluate', {contextId:executionContextId, expression:"Array.from(CSS.highlights.get('hearhear-word') || []).map(r => r.toString()).join('')", returnByValue:true});
+    return result.result.value;
+  };
+  await eventually(async () => Boolean(await highlighted()));
   await page.screenshot({path:'dist/smoke-player.png'});
+  const command = (action, value) => worker.evaluate(({owner, action, value}) => chrome.runtime.sendMessage({target:'offscreen', owner, action, value}), {owner, action, value});
+  await command('seek', 19.9);
+  await eventually(async () => (await state()).chunkIndex === 1 && (await state()).phase === 'loading');
+  await eventually(async () => !(await highlighted()));
+  assert.equal(requests.length, 2, 'must reuse pending next chunk');
+  answers[1]();
+  await eventually(async () => (await state()).phase === 'playing');
+  await eventually(() => requests.length === 3);
+  await eventually(async () => (await highlighted()) === 'Это');
+  // Advancing is automatic and bounded; the rest of the article is not queued.
+  assert.equal((await state()).chunkIndex, 1);
   await page.goto('https://article.test/two');
   await page.locator('[data-chrome-sound]').waitFor();
   await eventually(async () => (await state()).phase === 'idle');
   assert.equal(await page.locator('[data-chrome-sound]').count(), 1);
-  console.log(extensionPath, 'PASS: popup settings, real MV3 load, closed-shadow trusted click, CSP, RU payload, loading, offscreen playback, pause, seek, cached resume, navigation cleanup.');
+  console.log(extensionPath, 'PASS: popup settings, real MV3 load, closed-shadow trusted click, CSP, RU payload, loading, offscreen playback, pause, seek, bounded chunk prefetch, automatic advance, word highlighting, navigation cleanup.');
 } finally {
   await context?.close(); server.closeAllConnections(); await new Promise(r => server.close(r));
   await rm(profile, {recursive:true, force:true});

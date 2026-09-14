@@ -14,3 +14,8 @@
 - Do not treat every `<article>` as the page article. Homepage and blog index cards on kurapov.ee are sibling `<article>` elements with long excerpts; injecting a player into one of them breaks the CSS grid. Skip 3+ sibling article cards, require a heading inside the candidate, and prefer the widest remaining column.
 - `new URL('..', import.meta.url)` already points at the parent directory. Extra `dirname()` on that path walks one level too far when the URL has a trailing slash.
 - Origin is `git@github.com:A2gent/HearHear.git`. Push is possible; do not assume there is no remote.
+- Scope filesystem discovery to the requested component; workspace-wide `find ..` can time out and the workspace parent is not necessarily a Git repository.
+- Deferred TTS tests need a per-test timeout during the red phase: an old whole-article implementation may never resolve a sentence-specific fake response.
+- Reviewer delegation can fail due to project binding or exhausted provider credits. Record the limitation and perform local review/tests rather than changing agent configuration or retrying indefinitely.
+- Browser HTML fixtures containing Cyrillic must declare UTF-8. Otherwise Chromium decodes them as Windows-1252 and payload/highlight assertions test mojibake instead of Russian text.
+- Do not spread article-sized arrays into `push`: extraction runs before the 60,000-character check, and oversized pages can exceed the engine argument limit. Copy source-map entries with loops instead.

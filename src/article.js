@@ -1,18 +1,44 @@
 const EXCLUDED = 'script,style,noscript,nav,aside,footer,form,button,input,textarea,select,[hidden],[aria-hidden="true"],[inert],[contenteditable="true"],.related-articles,.article-meta,.comments,#comments,[role="navigation"],[data-chrome-sound]';
 const SPECIAL = 'table,img,svg,canvas,pre,code,.mermaid,[role="img"]';
 const BLOCK = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,figcaption,dt,dd';
-export function cleanText(text) {
-  return text.normalize('NFKC')
-    .replace(/https?:\/\/\S+|www\.\S+/gi, '')
-    .replace(/\b[a-f\d]{24,}\b/gi, '')
-    .replace(/\d(?:[\d\s-]{11,}\d)/g, '')
-    // Control characters are deliberately stripped before sending text to TTS.
-    // eslint-disable-next-line no-control-regex
-    .replace(/[«»„“”"`]|[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e]/g, ' ')
-    .replace(/[_=~*#|]{3,}/g, ' ')
-    .replace(/[—–]/g, ', ')
-    .replace(/\s+/g, ' ').trim();
+// Preserve source offsets through normalization/removal; matching cleaned words
+// back by text alone would highlight repeated words or excluded content wrongly.
+function cleanMapped(text, origins = []) {
+  let chars = []; let points = [];
+  for (const part of new Intl.Segmenter('en', {granularity:'grapheme'}).segment(text)) {
+    const normalized = part.segment.normalize('NFKC');
+    chars.push(normalized);
+    const first = origins[part.index]; const last = origins[part.index + part.segment.length - 1];
+    const point = first && last && first.node === last.node ? {...first, end:last.end} : null;
+    for (let i = 0; i < normalized.length; i++) points.push(point);
+  }
+  text = chars.join('');
+  function replace(pattern, replacement) {
+    const next = []; let previous = 0;
+    text = text.replace(pattern, (match, offset) => {
+      for (let i = previous; i < offset; i++) next.push(points[i]);
+      for (let i = 0; i < replacement.length; i++) next.push(null);
+      previous = offset + match.length;
+      return replacement;
+    });
+    for (let i = previous; i < points.length; i++) next.push(points[i]);
+    points = next;
+  }
+  replace(/https?:\/\/\S+|www\.\S+/gi, '');
+  replace(/\b[a-f\d]{24,}\b/gi, '');
+  replace(/\d(?:[\d\s-]{11,}\d)/g, '');
+  // Control characters are deliberately stripped before sending text to TTS.
+  // eslint-disable-next-line no-control-regex
+  replace(/[«»„“”"`]|[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e]/g, ' ');
+  replace(/[_=~*#|]{3,}/g, ' ');
+  replace(/[—–]/g, ', ');
+  replace(/\s+/g, ' ');
+  const start = text.length - text.trimStart().length;
+  const value = text.trim();
+  return {text:value, points:points.slice(start, start + value.length)};
 }
+export function cleanText(text) { return cleanMapped(text).text; }
+
 function excluded(el) {
   if (el.matches(EXCLUDED)) return true;
   const style = el.ownerDocument.defaultView?.getComputedStyle(el);
@@ -38,15 +64,19 @@ function label(el) {
 function collect(root, language) {
   const ru = language === 'ru';
   const segments = [];
-  let buffer = '';
+  let buffer = ''; let origins = [];
+  const append = (text, node = null) => {
+    buffer += text;
+    for (let i = 0; i < text.length; i++) origins.push(node ? {node, start:i, end:i + 1} : null);
+  };
   let source = root;
   const flush = () => {
-    const text = cleanText(buffer);
-    if (text) segments.push({ text, element: source });
-    buffer = '';
+    const {text, points} = cleanMapped(buffer, origins);
+    if (text) segments.push({text, element:source, points});
+    buffer = ''; origins = [];
   };
   function walk(node) {
-    if (node.nodeType === 3) { buffer += node.textContent; return; }
+    if (node.nodeType === 3) { append(node.textContent, node); return; }
     if (node.nodeType !== 1 || excluded(node)) return;
     if (node !== root && node.matches('article')) return;
     if (node.matches(SPECIAL)) {
@@ -57,7 +87,7 @@ function collect(root, language) {
       } else if (node.matches('pre,code')) text = ru ? 'Код.' : 'Code.';
       else if (node.matches('svg,canvas,.mermaid')) text = ru ? 'Диаграмма.' : 'Diagram.';
       else if (label(node)) text = `${ru ? 'Изображение' : 'Image'}: ${label(node)}.`;
-      buffer += ` ${text} `;
+      append(` ${text} `);
       return;
     }
     const block = node.matches(BLOCK);
@@ -70,9 +100,9 @@ function collect(root, language) {
         if (item === node) break;
         ordinal += step;
       }
-      buffer += `${ru ? 'Пункт' : 'Item'} ${ordinal}. `;
+      append(`${ru ? 'Пункт' : 'Item'} ${ordinal}. `);
     }
-    if (node.matches('br,hr')) buffer += ' ';
+    if (node.matches('br,hr')) append(' ');
     for (const child of node.childNodes) walk(child);
     if (block) { flush(); source = root; }
   }

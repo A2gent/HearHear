@@ -59,3 +59,7 @@ test('infers Russian without a lang attribute and detects prose main fallback', 
 test('fails explicitly for oversized articles', () => {
   assert.throws(() => extractArticle(doc(`<article><h1>Длинная</h1><p>${prose.repeat(200)}</p></article>`)), /60000/);
 });
+
+test('large unbroken input is cleaned without argument-spread stack overflow', () => {
+  assert.equal(cleanText('я'.repeat(200000)).length, 200000);
+});

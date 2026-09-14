@@ -105,3 +105,96 @@ test('autoplay rejection offers manual play, synthesis failure offers retry', as
   await broken.start(1, {text:'one'});
   assert.equal(broken.status(1).phase, 'error');
 });
+
+const tick = () => new Promise(resolve => setImmediate(resolve));
+test('starts with a sentence, prefetches only one ahead, and advances on ended', async () => {
+  const calls = [];
+  const {player, audio, revoked} = setup(async req => {calls.push(req); return new Blob([req.text]);});
+  await player.start(1, {text:'One sentence. Two sentences. Third sentence.', language:'en', model:'voice'});
+  await tick();
+  assert.deepEqual(calls.map(c => c.text), ['One sentence.', 'Two sentences.']);
+  assert.ok(calls.every(c => c.model === 'voice'));
+  assert.equal(player.status(1).chunkCount, 3);
+  assert.equal(player.status(1).wordStart, 0);
+  audio.dispatchEvent(new Event('ended'));
+  await tick();
+  assert.equal(player.status(1).chunkIndex, 1);
+  assert.equal(player.status(1).wordStart, 14);
+  assert.deepEqual(calls.map(c => c.text), ['One sentence.', 'Two sentences.', 'Third sentence.']);
+  assert.equal(revoked.length, 1);
+  player.stop(1);
+});
+test('waiting for next chunk is cancellable and never plays stale results', {timeout:2000}, async () => {
+  let finish; let signal;
+  const {player, audio} = setup(async req => {
+    if (req.text === 'First.') return new Blob(['first']);
+    signal = req.signal;
+    return new Promise(resolve => {finish = resolve;});
+  });
+  await player.start(1, {text:'First. Second. Third.'});
+  audio.dispatchEvent(new Event('ended'));
+  assert.equal(player.status(1).phase, 'loading');
+  player.stop(1);
+  assert.equal(signal.aborted, true);
+  finish(new Blob(['late'])); await tick();
+  assert.equal(player.status(1).phase, 'idle');
+  assert.equal(audio.src, '');
+});
+test('prefetch errors do not interrupt current audio and surface only on advance', async () => {
+  const {player, audio} = setup(async req => {
+    if (req.text === 'Second.') throw new Error('next failed');
+    return new Blob(['audio']);
+  });
+  await player.start(1, {text:'First. Second.'}); await tick();
+  assert.equal(player.status(1).phase, 'playing');
+  audio.dispatchEvent(new Event('ended')); await tick();
+  assert.equal(player.status(1).phase, 'error');
+  assert.match(player.status(1).error, /next failed/);
+  player.stop(1);
+});
+
+test('autoplay block delays prefetch and pausing never queues the rest of the article', async () => {
+  const calls = [];
+  const {player, audio} = setup(async req => {calls.push(req.text); return new Blob(['audio']);});
+  audio.play = async () => {throw new Error('blocked');};
+  await player.start(1, {text:'First. Second. Third.'});
+  assert.deepEqual(calls, ['First.']);
+  audio.play = FakeAudio.prototype.play;
+  await player.command(1, 'toggle'); await tick();
+  assert.deepEqual(calls, ['First.', 'Second.']);
+  await player.command(1, 'toggle'); await tick();
+  assert.equal(player.status(1).phase, 'paused');
+  assert.equal(calls.length, 2);
+  player.stop(1);
+});
+test('multi-chunk replay restarts the article and releases completed audio cache', async () => {
+  const calls = [];
+  const {player, audio} = setup(async req => {calls.push(req.text); return new Blob(['audio']);});
+  await player.start(1, {text:'First. Second.'}); await tick();
+  audio.dispatchEvent(new Event('ended')); await tick();
+  assert.equal(player.cache.size, 1);
+  audio.dispatchEvent(new Event('ended'));
+  assert.equal(player.status(1).phase, 'ended');
+  await player.command(1, 'toggle'); await tick();
+  assert.equal(player.status(1).chunkIndex, 0);
+  assert.deepEqual(calls, ['First.', 'Second.', 'First.', 'Second.']);
+  player.stop(1);
+});
+test('replacement cancels speculative audio without corrupting the new owner', async () => {
+  let finish; let signal;
+  const {player} = setup(async req => {
+    if (req.text === 'Second.') {
+      signal = req.signal;
+      return new Promise(resolve => {finish = resolve;});
+    }
+    return new Blob([req.text]);
+  });
+  await player.start(1, {text:'First. Second.'});
+  await player.start(2, {text:'Replacement.'});
+  assert.equal(signal.aborted, true);
+  finish(new Blob(['stale'])); await tick();
+  assert.equal(player.status(1).phase, 'idle');
+  assert.equal(player.status(2).phase, 'playing');
+  assert.equal(player.status(2).chunkCount, 1);
+  player.stop(2);
+});
