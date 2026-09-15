@@ -33,13 +33,27 @@ test('picks the widest article and ignores nested or narrow extra blocks', () =>
   assert.equal(d.querySelectorAll('article').length, 5);
 });
 test('summarizes non-prose without reading their contents', () => {
-  const a = extractArticle(doc(`<article><h1>Фото</h1><p>${prose}</p><table><tr><th>Формат</th><th>Размер</th></tr><tr><td>SECRET_CELL</td></tr></table><img aria-label="Закат"><img src="skip.jpg"><svg><text>SECRET_SVG</text></svg><pre><code>SECRET_CODE</code></pre><div class="mermaid">SECRET_DIAGRAM</div><p>Читайте <a href="https://example.com/secret">источник</a>.</p></article>`));
+  const longCode = 'function hiddenPayload() { const token = SECRET_SNIPPET; return token; }\n'.repeat(4);
+  const a = extractArticle(doc(`<article><h1>Фото</h1><p>${prose}</p><table><tr><th>Формат</th><th>Размер</th></tr><tr><td>SECRET_CELL</td></tr></table><img aria-label="Закат"><img src="skip.jpg"><svg><text>SECRET_SVG</text></svg><pre><code>${longCode}</code></pre><div class="mermaid">SECRET_DIAGRAM</div><p>Читайте <a href="https://example.com/secret">источник</a>.</p></article>`));
   assert.match(a.text, /Таблица.*Формат.*Размер/);
   assert.match(a.text, /Изображение.*Закат/);
   assert.match(a.text, /Диаграмма/);
-  assert.match(a.text, /Код/);
+  assert.match(a.text, /Длинный код/);
   assert.match(a.text, /источник/);
-  assert.doesNotMatch(a.text, /SECRET|https:|skip.jpg/);
+  assert.doesNotMatch(a.text, /SECRET|https:|skip.jpg|hiddenPayload/);
+});
+test('reads short pronounceable code and skips punctuation and long snippets', () => {
+  const longCode = 'function hiddenPayload() { const token = SECRET_SNIPPET; return token; }\n'.repeat(4);
+  const a = extractArticle(doc(`<article><h1>Фото</h1><p>${prose}</p><p>macOS <code>say</code> and <code>foo(); bar:</code> plus <code>&lt;&gt;;;::</code>.</p><pre><code>${longCode}</code></pre></article>`));
+  assert.match(a.text, /say/);
+  assert.match(a.text, /foo bar/);
+  assert.doesNotMatch(a.text, /foo\(\)|bar:|[<>]/);
+  assert.match(a.text, /Код/);
+  assert.match(a.text, /Длинный код/);
+  assert.doesNotMatch(a.text, /SECRET_SNIPPET|hiddenPayload/);
+  const en = extractArticle(new JSDOM(`<html lang="en"><body><article><h1>Photos</h1><p>${'This is a detailed article about photography, technology and modern image formats. '.repeat(5)}</p><pre><code>${longCode}</code></pre></article></body></html>`).window.document);
+  assert.match(en.text, /Long code/);
+  assert.doesNotMatch(en.text, /hiddenPayload/);
 });
 test('numbers only outer ordered items and never duplicates nested text', () => {
   const a = extractArticle(doc(`<article><h1>Фото</h1><p>${prose}</p><ol start="3"><li>Первый<ol><li>Вложенный</li></ol></li><li value="8">Второй<ul><li>Глубокий</li></ul></li></ol></article>`));

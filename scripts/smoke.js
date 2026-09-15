@@ -42,7 +42,7 @@ try {
   assert.equal(await popup.locator('#model').inputValue(), 'auto');
   await popup.close();
   const page = await context.newPage();
-  await page.route('https://article.test/**', route => route.fulfill({contentType:'text/html; charset=utf-8', headers:{'Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'"}, body:`<html lang="ru"><h1>Тест</h1><div style="height:1200px"></div><article><h1>Статья о фотографии</h1><p>${'Это длинная русская статья о форматах фотографий и технологиях обработки изображений. '.repeat(8)}</p><pre>secret code</pre></article></html>`}));
+  await page.route('https://article.test/**', route => route.fulfill({contentType:'text/html; charset=utf-8', headers:{'Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'"}, body:`<html lang="ru"><h1>Тест</h1><div style="height:1200px"></div><article><h1>Статья о фотографии</h1><p>${'Это длинная русская статья о форматах фотографий и технологиях обработки изображений. '.repeat(8)}</p><pre>${'function secretPayload() { return SECRET_CODE; }\n'.repeat(4)}</pre></article></html>`}));
   await page.goto('https://article.test/one');
   await page.locator('[data-chrome-sound]').waitFor();
   const playerPosition = await page.locator('[data-chrome-sound]').evaluate(host => {

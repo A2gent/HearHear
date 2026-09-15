@@ -32,7 +32,7 @@ test('maps cleaned words across inline nodes without changing article DOM', () =
   assert.deepEqual(scrolls, [{top:340, behavior:'smooth'}]);
   assert.equal(show('HDR'), 'HDR');
   assert.equal(show('fine'), 'ﬁne');
-  assert.equal(show('Code'), undefined, 'synthetic summaries have no source word');
+  assert.equal(show('secret'), 'secret');
   assert.equal(show('word'), 'word');
   assert.equal(article.root.innerHTML, before);
   highlighter.update({phase:'loading'});

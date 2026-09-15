@@ -1,6 +1,37 @@
 const EXCLUDED = 'script,style,noscript,nav,aside,footer,form,button,input,textarea,select,[hidden],[aria-hidden="true"],[inert],[contenteditable="true"],.related-articles,.article-meta,.comments,#comments,[role="navigation"],[data-chrome-sound]';
 const SPECIAL = 'table,img,svg,canvas,pre,code,.mermaid,[role="img"]';
 const BLOCK = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,figcaption,dt,dd';
+const MAX_SPOKEN_CODE_WORDS = 8;
+const MAX_SPOKEN_CODE_CHARS = 60;
+
+// WHY: TTS should speak short identifiers (say, npm) but not punctuation or whole listings.
+function codeSpeech(node, ru) {
+  let spoken = '';
+  const points = [];
+  const space = () => {
+    if (!spoken || spoken.endsWith(' ')) return;
+    spoken += ' ';
+    points.push(null);
+  };
+  (function walk(n) {
+    if (n.nodeType === 3) {
+      const value = n.textContent;
+      for (let i = 0; i < value.length; i++) {
+        if (/[\p{L}\p{N}]/u.test(value[i])) {
+          spoken += value[i];
+          points.push({node:n, start:i, end:i + 1});
+        } else space();
+      }
+    } else if (n.nodeType === 1) for (const child of n.childNodes) walk(child);
+  })(node);
+  while (spoken.startsWith(' ')) { spoken = spoken.slice(1); points.shift(); }
+  while (spoken.endsWith(' ')) { spoken = spoken.slice(0, -1); points.pop(); }
+  if (!spoken) return {text: ru ? 'Код.' : 'Code.', points:[]};
+  if (spoken.split(' ').length > MAX_SPOKEN_CODE_WORDS || spoken.length > MAX_SPOKEN_CODE_CHARS) {
+    return {text: ru ? 'Длинный код.' : 'Long code.', points:[]};
+  }
+  return {text:spoken, points};
+}
 // Preserve source offsets through normalization/removal; matching cleaned words
 // back by text alone would highlight repeated words or excluded content wrongly.
 function cleanMapped(text, origins = []) {
@@ -80,12 +111,19 @@ function collect(root, language) {
     if (node.nodeType !== 1 || excluded(node)) return;
     if (node !== root && node.matches('article')) return;
     if (node.matches(SPECIAL)) {
+      if (node.matches('pre,code')) {
+        const speech = codeSpeech(node, ru);
+        append(' ');
+        buffer += speech.text;
+        for (let i = 0; i < speech.text.length; i++) origins.push(speech.points[i] || null);
+        append(' ');
+        return;
+      }
       let text = '';
       if (node.matches('table')) {
         const headers = [...node.querySelectorAll('th')].filter(el => !excluded(el)).slice(0, 16).map(el => cleanText(el.textContent)).join(', ');
         text = `${ru ? 'Таблица' : 'Table'}${headers ? ': ' + headers : ''}.`;
-      } else if (node.matches('pre,code')) text = ru ? 'Код.' : 'Code.';
-      else if (node.matches('svg,canvas,.mermaid')) text = ru ? 'Диаграмма.' : 'Diagram.';
+      } else if (node.matches('svg,canvas,.mermaid')) text = ru ? 'Диаграмма.' : 'Diagram.';
       else if (label(node)) text = `${ru ? 'Изображение' : 'Image'}: ${label(node)}.`;
       append(` ${text} `);
       return;

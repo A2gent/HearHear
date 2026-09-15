@@ -22,7 +22,7 @@ export function createHighlighter(article) {
       if (key === previous) return;
       clear();
       const source = points.slice(start, end);
-      // Generated labels (Code, Diagram, list numbering) are not page words.
+      // Generated labels (Long code, Diagram, list numbering) are not page words.
       // Never guess a match in other visible/hidden text when a source is absent.
       if (source.some(p => !p?.node.isConnected)) return;
       const spans = [];
